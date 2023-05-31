@@ -7,7 +7,7 @@ filenames = ['选择你的文件路径']
 file_value = g.buttonbox(msg,title,filenames)
 file_path = g.fileopenbox(default='*.csv')
 
-# 打开文件读取
+# 打开文件读取测试
 with open(file_path, 'r') as f:
     reader = csv.reader(f)
     csv_list = [row for row in reader]
