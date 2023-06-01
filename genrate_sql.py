@@ -7,59 +7,110 @@ filenames = ['选择你的文件路径']
 file_value = g.buttonbox(msg,title,filenames)
 file_path = g.fileopenbox(default='*.csv')
 
-# 打开文件读取测试
-with open(file_path, 'r') as f:
-    reader = csv.reader(f)
-    csv_list = [row for row in reader]
+csv_list = None
+clear_list = None
+count = 0
+pt = 0
+version = None
+formatter_dates = None
 
-    #判断list里是否有空字符串，如果有就将空字符串删除
-    clear_csv_list = [row for row in csv_list if any(row)]
 
-    # 读取最后一行（最新的版本号)
-    last_row = clear_csv_list[-1]
 
-    # 读取项目
-    platform = csv_list[2]
+sql_template = """select to_date(`date`) as dt,'{}' as platform,count(distinct if(event='AppCrashed' and `$app_id`='{}',$device_id,null))/
+count(distinct if(event='$AppStart' and `$app_id`='{}',$device_id,null)) * 100 as rate from events where event in ('AppCrashed','$AppStart') 
+and `date` = '{}' and `$app_version` in ('{}') group by to_date(`date`) """
 
-    # 读取应用标识
+
+# 打开文件读取
+def open_csv(file_path):
+   with open(file_path, 'r') as f:
+        global csv_list
+        reader = csv.reader(f)
+        csv_list = [row for row in reader]
+        return csv_list
+
+
+
+
+#     #判断list里是否有空字符串，如果有就将空字符串删除
+def get_clear_list(csv_list):
+    global clear_list
+    clear_list = [row for row in csv_list if any(row)]
+    return clear_list
+
+#     # 读取从项目开始直到最后一行的数据)
+def get_version_row(clear_list):
+    global last_row
+    last_row1 = clear_list[3:]
+    last_row = last_row1
+    return last_row
+
+
+#     #读取platform
+def get_platfrom(csv_list):
+    platfrom = csv_list[2]
+    return platfrom
+
+
+   #  # 读取应用标识
+def get_appid(csv_list):
+    global appid
     appid_row = csv_list[1]
-
-    # 删除 应用标识的 appid和项目的 日期
-    del appid_row[0]
-    del platform[0]
-
-    # 判断appversion中的元素是否有, 如果就就将其分割成元祖
-    appversion = [tuple(x.split(',')) if ',' in x else x for x in last_row]
+    return appid_row
 
 
-   # 对列表appversion中的每个元素进行处理，如果元素是字符串类型，则将其中的\n替换为空字符串，
-   # 否则将元组中的每个元素进行相同的替换操作，并返回一个新的列表new_appversion。
-   # 然后，对于new_appversion中的每个元素，如果它是字符串类型，则将其保留不变，否则将元组中的每个元素用','连接起来，并用单引号包裹，
-   # 返回一个新的列表new_list。这个操作可能是将元组转换为字符串的目的。
-    new_appversion = [x.replace('\n', '') if isinstance(x, str) else tuple(item.replace('\n', '') for item in x) for x in appversion]
-    new_list = [x if isinstance(x, str) else "','".join(x) for x in new_appversion]
+
+    #获取日期列去除年 月 日 然后返回最后的日期
+def get_date_list(clear_list):
+    global formatter_dates
+    formatted_dates = []
+    column_data = [row[0] for row in clear_list[2:]]
+    column_data1 = column_data[1:]
+    for data_str in column_data1:
+        date_parts = data_str.split('年')[1].split('月')
+        year = data_str.split('年')[0]
+        month = date_parts[0].zfill(2)
+        day = date_parts[1].split('日')[0].zfill(2)
+        formatted_date = '-'.join([year, month, day])
+        formatted_dates.append(formatted_date)
+    return formatted_dates
 
 
-    # 格式化日期
-    date_parts = last_row[0].split('年')[1].split('月')
-    year = last_row[0].split('年')[0]
-    month = date_parts[0].zfill(2)
-    day = date_parts[1].split('日')[0].zfill(2)
-    formatted_date = '-'.join([year, month, day])
+def genrate_sql(pt,appid,last_row):
+    global statements
+    sql_statements = []
+    for i, date in enumerate(last_row):
+        win_and_mac_sql = sql_template.format(pt[0], appid[0], appid[0], date[0].replace('年', '-').replace('月', '-').replace('日', ''), date[1].replace(',', "','"))
+        x64_sql = sql_template.format(pt[1], appid[1], appid[1], date[0].replace('年', '-').replace('月', '-').replace('日', ''), date[2].replace(',',"','"))
+        x_sql = sql_template.format(pt[2], appid[2], appid[2], date[0].replace('年', '-').replace('月', '-').replace('日', ''), date[3].replace(',', "','"))
+        arm_sql = sql_template.format(pt[3], appid[3], appid[3], date[0].replace('年', '-').replace('月', '-').replace('日', ''), date[4].replace(',', "','"))
+        ios_sql = sql_template.format(pt[4], appid[4], appid[4], date[0].replace('年', '-').replace('月', '-').replace('日', ''), date[5].replace(',', "','"))
+        android_sql = sql_template.format(pt[5], appid[5], appid[5], date[0].replace('年', '-').replace('月', '-').replace('日', ''), date[6].replace(',', "','"))
+        #判定是否是最后一次执行 如果是的话那么在去掉ios_sql后的'\nunion all\n'
+        if i == len(last_row) - 1:
+            sql_statements.append((win_and_mac_sql, '\nunion all\n', x_sql, '\nunion all\n', x64_sql, '\nunion all\n',
+                               android_sql, '\nunion all\n', arm_sql, '\nunion all\n', ios_sql))
+        else:
+            sql_statements.append((win_and_mac_sql, '\nunion all\n', x_sql, '\nunion all\n', x64_sql, '\nunion all\n',
+                               android_sql, '\nunion all\n', arm_sql, '\nunion all\n', ios_sql, '\nunion all\n'))
 
-    # 目标sql
-    sql_template = """select to_date(`date`) as dt,'{}' as platform,count(distinct if(event='AppCrashed' and `$app_id`='{}',uuid,null))/count(distinct if(event='$AppStart' and `$app_id`='{}',uuid,null)) * 100 as rate from events where event in ('AppCrashed','$AppStart') and `date` = '{}' and `$app_version` in ('{}') group by to_date(`date`) """
+    statements = '\n'.join(['\n'.join(statement) for statement in sql_statements])
+    return statements
 
-    # 生成不同项目下的sql123123123
-    win_and_mac_sql = sql_template.format(platform[0], appid_row[0], appid_row[0], formatted_date, new_list[1]).replace('uuid','$device_id')
-    x64_sql = sql_template.format(platform[1], appid_row[1], appid_row[1], formatted_date, new_list[2]).replace('uuid','$device_id')
-    x_sql = sql_template.format(platform[2], appid_row[2], appid_row[2], formatted_date, new_list[3]).replace('uuid','$device_id')
-    arm_sql = sql_template.format(platform[3], appid_row[3], appid_row[3], formatted_date, new_list[4]).replace('uuid','$device_id')
-    ios_sql = sql_template.format(platform[4], appid_row[4], appid_row[4], formatted_date, new_list[5]).replace('uuid','$device_id')
-    android_sql = sql_template.format(platform[5], appid_row[5], appid_row[5], formatted_date, new_list[6]).replace('uuid','$device_id')
 
-    # 对最终sql拼装，并格式化下
-    sql = " \n\n union all \n\n".join([win_and_mac_sql , x64_sql , x_sql, arm_sql, ios_sql, android_sql])
+csv_list = open_csv(file_path)
+pt = get_platfrom(csv_list)
+del pt[0]
+clear_list = get_clear_list(csv_list)
 
-    #将结果回调
-    g.textbox("文件",text = sql,codebox = True)
+last_row = get_version_row(clear_list)
+
+appid = get_appid(csv_list)
+
+formatter_dates = get_date_list(clear_list)
+
+del appid[0]
+
+statements = genrate_sql(pt,appid,last_row,)
+g.textbox("文件",text = statements,codebox = True)
+
